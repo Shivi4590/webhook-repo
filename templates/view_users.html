@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Registered Users</title>
+</head>
+<body>
+  <h2>Registered Users</h2>
+  {% if data %}
+    <table border="1">
+      <tr>
+        {% for key in data[0].keys() %}
+          <th>{{ key }}</th>
+        {% endfor %}
+      </tr>
+      {% for user in data %}
+        <tr>
+          {% for value in user.values() %}
+            <td>{{ value }}</td>
+          {% endfor %}
+        </tr>
+      {% endfor %}
+    </table>
+  {% else %}
+    <p>No users found.</p>
+  {% endif %}
+  <br><a href="{{ url_for('dashboard') }}">Back to Dashboard</a>
+</body>
+</html>

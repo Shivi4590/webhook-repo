@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>GitHub Events Viewer</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 30px; }
+    h1 { color: #333; }
+    ul { list-style-type: none; padding: 0; }
+    li { background: #f0f0f0; margin: 10px 0; padding: 10px; border-radius: 4px; }
+  </style>
+</head>
+<body>
+  <h1>Latest GitHub Events</h1>
+  <ul id="events"></ul>
+
+  <script>
+    async function fetchEvents() {
+      const response = await fetch('http://localhost:5000/events');
+      const data = await response.json();
+      const list = document.getElementById('events');
+      list.innerHTML = '';
+
+      data.forEach(event => {
+        let text = '';
+        if (event.action === 'push') {
+          text = `"${event.author}" pushed to "${event.to_branch}" on ${event.timestamp}`;
+        } else if (event.action === 'pull_request') {
+          text = `"${event.author}" submitted a pull request from "${event.from_branch}" to "${event.to_branch}" on ${event.timestamp}`;
+        } else if (event.action === 'merge') {
+          text = `"${event.author}" merged branch "${event.from_branch}" to "${event.to_branch}" on ${event.timestamp}`;
+        }
+        const li = document.createElement('li');
+        li.textContent = text;
+        list.appendChild(li);
+      });
+    }
+
+    // Fetch initially
+    fetchEvents();
+    // Fetch every 15 seconds
+    setInterval(fetchEvents, 15000);
+  </script>
+</body>
+</html>

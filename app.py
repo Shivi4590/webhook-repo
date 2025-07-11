@@ -1,59 +1,121 @@
-from flask import Flask, request, jsonify
-from pymongo import MongoClient
+from flask import Flask, request, render_template, redirect, url_for, session, jsonify, Response
+from flask_pymongo import PyMongo
+from bson import ObjectId
 from datetime import datetime
+import json
+import csv
 
 app = Flask(__name__)
+app.secret_key = "supersecretkey"
 
-# MongoDB connection
-client = MongoClient("mongodb://localhost:27017/")
-db = client["webhook_db"]
-events = db["events"]
+# MongoDB config
+app.config["MONGO_URI"] = "mongodb://localhost:27017/webhook_db"
+mongo = PyMongo(app)
 
-@app.route('/webhook', methods=['POST'])
+# Home (redirect to login)
+@app.route("/")
+def home():
+    return redirect(url_for("login"))
+
+# Signup
+@app.route("/signup", methods=["GET", "POST"])
+def signup():
+    if request.method == "POST":
+        username = request.form["username"]
+        password = request.form["password"]
+
+        existing_user = mongo.db.users.find_one({"username": username})
+        if existing_user:
+            return "Username already exists. Try another."
+
+        mongo.db.users.insert_one({"username": username, "password": password})
+        session["username"] = username
+        return redirect(url_for("dashboard"))
+
+    return render_template("signup.html")
+
+# Login
+@app.route("/login", methods=["GET", "POST"])
+def login():
+    if request.method == "POST":
+        username = request.form["username"]
+        password = request.form["password"]
+
+        user = mongo.db.users.find_one({"username": username, "password": password})
+        if user:
+            session["username"] = username
+            return redirect(url_for("dashboard"))
+        else:
+            return "Invalid credentials."
+    return render_template("login.html")
+
+# Logout
+@app.route("/logout")
+def logout():
+    session.clear()
+    return redirect(url_for("login"))
+
+# Dashboard
+@app.route("/dashboard")
+def dashboard():
+    if "username" not in session:
+        return redirect(url_for("login"))
+    return render_template("dashboard.html", username=session["username"])
+
+# Webhook endpoint
+@app.route("/webhook", methods=["POST"])
 def webhook():
-    payload = request.json
-    action = ""
-    author = ""
-    from_branch = ""
-    to_branch = ""
-    timestamp = datetime.utcnow().strftime("%d %B %Y - %I:%M %p UTC")
+    if request.is_json:
+        data = request.json
+        data["timestamp"] = datetime.utcnow()
+        mongo.db.webhooks.insert_one(data)
+        return "Webhook received!", 200
+    return "Invalid payload", 400
 
-    if 'head_commit' in payload:
-        action = "push"
-        author = payload["head_commit"]["author"]["name"]
-        to_branch = payload["ref"].split("/")[-1]
+# View stored webhooks
+@app.route("/view")
+def view_data():
+    if "username" not in session:
+        return redirect(url_for("login"))
 
-    elif 'pull_request' in payload:
-        action = "pull_request"
-        author = payload["pull_request"]["user"]["login"]
-        from_branch = payload["pull_request"]["head"]["ref"]
-        to_branch = payload["pull_request"]["base"]["ref"]
+    webhooks = list(mongo.db.webhooks.find())
+    for doc in webhooks:
+        if "timestamp" not in doc:
+            doc["timestamp"] = None
+    return render_template("view.html", data=webhooks)
 
-    elif payload.get('action') == 'closed' and payload.get('pull_request', {}).get('merged'):
-        action = "merge"
-        author = payload["pull_request"]["user"]["login"]
-        from_branch = payload["pull_request"]["head"]["ref"]
-        to_branch = payload["pull_request"]["base"]["ref"]
+# Delete webhook by ID
+@app.route("/delete/<id>", methods=["POST"])
+def delete_webhook(id):
+    mongo.db.webhooks.delete_one({"_id": ObjectId(id)})
+    return "", 204
 
-    else:
-        return jsonify({"message": "Ignored event"}), 200
+# Export as CSV
+@app.route("/export")
+def export_csv():
+    webhooks = mongo.db.webhooks.find()
+    def generate():
+        yield "ID,Payload,Timestamp\n"
+        for doc in webhooks:
+            payload = json.dumps(doc, default=str)
+            timestamp = doc.get("timestamp").strftime("%Y-%m-%d %H:%M:%S") if doc.get("timestamp") else ""
+            yield f"{str(doc.get('_id'))},{payload},{timestamp}\n"
+    return Response(generate(), mimetype="text/csv", headers={"Content-Disposition":"attachment;filename=webhooks.csv"})
 
-    data = {
-        "action": action,
-        "author": author,
-        "from_branch": from_branch,
-        "to_branch": to_branch,
-        "timestamp": timestamp
-    }
-    events.insert_one(data)
-    return jsonify({"message": "Event stored"}), 200
+# API endpoint for dashboard chart data
+@app.route("/api/stats")
+def api_stats():
+    pipeline = [
+        {
+            "$group": {
+                "_id": {"$dateToString": {"format": "%Y-%m-%d", "date": "$timestamp"}},
+                "count": {"$sum": 1}
+            }
+        },
+        {"$sort": {"_id": 1}}
+    ]
+    stats = list(mongo.db.webhooks.aggregate(pipeline))
+    return jsonify(stats)
 
-@app.route('/events', methods=['GET'])
-def get_events():
-    latest = list(events.find().sort("_id", -1).limit(10))
-    for e in latest:
-        e["_id"] = str(e["_id"])
-    return jsonify(latest)
-
-if __name__ == '__main__':
-    app.run(port=5000)
+if __name__ == "__main__":
+    app.run(debug=True)
