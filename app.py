@@ -66,12 +66,20 @@ def dashboard():
 @app.route("/webhook", methods=["POST"])
 def webhook():
     try:
-        data = request.get_json()
+        # Log raw data
+        raw_data = request.data
+        print("=== RAW DATA RECEIVED ===")
+        print(raw_data)
+
+        # Try to parse JSON
+        data = request.get_json(force=True)
         if not data:
             return "No JSON received", 400
+
         data["timestamp"] = datetime.utcnow()
         mongo.db.webhooks.insert_one(data)
         return "Webhook received!", 200
+
     except Exception as e:
         return f"Error: {str(e)}", 500
 
