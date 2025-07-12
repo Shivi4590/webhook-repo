@@ -12,7 +12,7 @@ app.secret_key = "supersecretkey"
 app.config["MONGO_URI"] = "mongodb://localhost:27017/webhook_db"
 mongo = PyMongo(app)
 
-# Home (redirect to login)
+# Home redirect to login
 @app.route("/")
 def home():
     return redirect(url_for("login"))
@@ -62,15 +62,18 @@ def dashboard():
         return redirect(url_for("login"))
     return render_template("dashboard.html", username=session["username"])
 
-# Webhook endpoint
+# ✅ Webhook endpoint (fixed)
 @app.route("/webhook", methods=["POST"])
 def webhook():
-    if request.is_json:
-        data = request.json
+    try:
+        data = request.get_json()
+        if not data:
+            return "No JSON received", 400
         data["timestamp"] = datetime.utcnow()
         mongo.db.webhooks.insert_one(data)
         return "Webhook received!", 200
-    return "Invalid payload", 400
+    except Exception as e:
+        return f"Error: {str(e)}", 500
 
 # View stored webhooks
 @app.route("/view")
